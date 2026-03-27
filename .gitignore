@@ -1,0 +1,18 @@
+# Thư mục build và phân phối
+dist/
+build/
+*.egg-info/
+
+# Môi trường ảo (Virtual Environments)
+venv/
+env/
+.env
+
+# Byte-compiled / tối ưu hóa (Cache)
+__pycache__/
+*.py[cod]
+*$py.class
+
+# IDE cá nhân
+.vscode/
+.idea/
