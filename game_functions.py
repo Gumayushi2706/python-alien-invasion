@@ -127,18 +127,20 @@ def trigger_explosion(ai_settings, stats, sb, ship, aliens, bosses):
     for alien in aliens.copy():
         if math.hypot(center[0] - alien.rect.centerx,
                       center[1] - alien.rect.centery) < r:
-            aliens.remove(alien)
-            killed += 1
+            if alien.take_hit(1):
+                aliens.remove(alien)
+                stats.score += alien.points
+                killed += 1
 
     for boss in bosses.copy():
         if math.hypot(center[0] - boss.rect.centerx,
                       center[1] - boss.rect.centery) < r:
-            if boss.take_hit():
+            if boss.take_hit(1):
                 bosses.remove(boss)
-                stats.score += ai_settings.boss_points
+                stats.score += boss.points
                 killed += 1
 
-    stats.score += ai_settings.alien_points * killed
+    stats.aliens_killed_this_wave += killed
     stats.aliens_killed_this_wave += killed
     if killed:
         sb.prep_score()
@@ -175,8 +177,9 @@ def get_number_aliens_x(ai_settings, alien_width: int) -> int:
     return int(available / (3 * alien_width))
 
 
-def create_alien(ai_settings, screen, aliens, alien_number: int, row_number: int = 0):
-    alien = Alien(ai_settings, screen)
+def create_alien(ai_settings, screen, aliens, alien_number: int,
+                 row_number: int = 0, wave: int = 1):
+    alien = Alien(ai_settings, screen, wave=wave)
     w = alien.rect.width
     alien.x = w + 3 * w * alien_number
     alien.rect.x = alien.x
@@ -184,21 +187,21 @@ def create_alien(ai_settings, screen, aliens, alien_number: int, row_number: int
     aliens.add(alien)
 
 
-def create_new_row(ai_settings, screen, aliens):
-    tmp = Alien(ai_settings, screen)
+def create_new_row(ai_settings, screen, aliens, wave: int = 1):
+    tmp = Alien(ai_settings, screen, wave=wave)
     n = get_number_aliens_x(ai_settings, tmp.rect.width)
     for i in range(n):
-        create_alien(ai_settings, screen, aliens, i, 0)
+        create_alien(ai_settings, screen, aliens, i, 0, wave=wave)
 
 
-def create_fleet(ai_settings, screen, ship, aliens):
-    tmp = Alien(ai_settings, screen)
+def create_fleet(ai_settings, screen, ship, aliens, wave: int = 1):
+    tmp = Alien(ai_settings, screen, wave=wave)
     nx = get_number_aliens_x(ai_settings, tmp.rect.width)
     available_y = (ai_settings.screen_height - 3 * tmp.rect.height - ship.rect.height)
     nr = int(available_y / (3 * tmp.rect.height))
     for row in range(nr):
         for col in range(nx):
-            create_alien(ai_settings, screen, aliens, col, row)
+            create_alien(ai_settings, screen, aliens, col, row, wave=wave)
 
 
 def spawn_boss(ai_settings, screen, bosses):
@@ -220,7 +223,7 @@ def ship_hit(ai_settings, screen, stats, sb, ship,
         ship.has_shield = False
         aliens.empty()
         alien_bullets.empty()
-        create_new_row(ai_settings, screen, aliens)
+        create_new_row(ai_settings, screen, aliens, wave=stats.wave)
         return
 
     if stats.ships_left > 0:
@@ -250,13 +253,12 @@ def check_collisions(ai_settings, screen, stats, sb, ship,
     for bullet, hit_aliens in hits.items():
         for alien in hit_aliens:
             damage = 2 if ship.double_damage else 1
-            alien.hp -= damage
-            if alien.hp <= 0:
+            if alien.take_hit(damage):
                 drop = maybe_drop(screen, ai_settings, alien)
                 if drop:
                     powerups.add(drop)
                 aliens.remove(alien)
-                stats.score += ai_settings.alien_points
+                stats.score += alien.points
                 stats.aliens_killed_this_wave += 1
         sb.prep_score()
     check_high_score(stats, sb)
@@ -266,12 +268,10 @@ def check_collisions(ai_settings, screen, stats, sb, ship,
     for bullet, hit_bosses in boss_hits.items():
         for boss in hit_bosses:
             damage = 2 if ship.double_damage else 1
-            for _ in range(damage):
-                if boss.take_hit():
-                    bosses.remove(boss)
-                    stats.score += ai_settings.boss_points
-                    stats.aliens_killed_this_wave += 3
-                    break
+            if boss.take_hit(damage):
+                bosses.remove(boss)
+                stats.score += boss.points
+                stats.aliens_killed_this_wave += 3
         sb.prep_score()
     check_high_score(stats, sb)
 
@@ -321,7 +321,7 @@ def _check_wave_clear(ai_settings, screen, stats, sb, ship,
         if stats.wave % ai_settings.boss_wave_interval == 0:
             spawn_boss(ai_settings, screen, bosses)
         else:
-            create_new_row(ai_settings, screen, aliens)
+            create_new_row(ai_settings, screen, aliens, wave=stats.wave)
 
         stats.last_alien_spawn_time = pygame.time.get_ticks()
 
@@ -370,7 +370,7 @@ def update_aliens(ai_settings, screen, stats, sb, ship,
     now = pygame.time.get_ticks()
     if now - stats.last_alien_spawn_time > ai_settings.spawn_cooldown:
         if len(bosses) == 0:   # Don't spawn rows during boss fight
-            create_new_row(ai_settings, screen, aliens)
+            create_new_row(ai_settings, screen, aliens, wave=stats.wave)
         stats.last_alien_spawn_time = now
 
     if pygame.sprite.spritecollideany(ship, aliens):
@@ -435,7 +435,7 @@ def _start_game(ai_settings, screen, stats, sb,
     ship.double_damage = False
     ship.rapid_fire = False
 
-    create_new_row(ai_settings, screen, aliens)
+    create_new_row(ai_settings, screen, aliens, wave=stats.wave)
     sb.prep_score()
     sb.prep_high_score()
     sb.prep_ships()
@@ -463,6 +463,9 @@ def update_screen(ai_settings, screen, stats, sb, hud, ship,
 
     # Aliens
     aliens.draw(screen)
+    # Health bars for Tank aliens (multi-HP)
+    for alien in aliens.sprites():
+        alien.draw_health_bar(screen)
 
     # Bosses + health bars
     for boss in bosses.sprites():
